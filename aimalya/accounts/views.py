@@ -9,7 +9,7 @@ from .models import User, OTP, BusinessProfile
 from .serializers import (
     UserRegistrationSerializer, UserLoginSerializer,
     OTPVerifySerializer, BusinessProfileSerializer, UserProfileSerializer,
-    ForgotPasswordSerializer, ResetPasswordSerializer
+    ForgotPasswordSerializer, ResetPasswordSerializer, ChangePasswordSerializer
 )
 
 class RegisterView(APIView):
@@ -31,7 +31,7 @@ class RegisterView(APIView):
                 "message": "User registered successfully. Please verify your email with the OTP sent.",
                 "user": serializer.data
             }, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_GATEWAY)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class VerifyOTPView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -50,8 +50,8 @@ class VerifyOTPView(APIView):
                 user.save()
                 otp.delete()
                 return Response({"message": "Email verified successfully."}, status=status.HTTP_200_OK)
-            return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_GATEWAY)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_GATEWAY)
+            return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -75,15 +75,18 @@ class LoginView(APIView):
                     'user': UserProfileSerializer(user).data
                 })
             return Response({"error": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_GATEWAY)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class BusinessSetupView(generics.CreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = BusinessProfileSerializer
 
+    @extend_schema(request=BusinessProfileSerializer, responses={201: BusinessProfileSerializer})
+
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
+@extend_schema(tags=['accounts'])
 class UserProfileView(generics.RetrieveUpdateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = UserProfileSerializer
@@ -133,3 +136,50 @@ class ResetPasswordView(APIView):
                 return Response({"message": "Password reset successfully."}, status=status.HTTP_200_OK)
             return Response({"error": "Invalid or expired OTP."}, status=status.HTTP_400_BAD_REQUEST)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ChangePasswordView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(request=ChangePasswordSerializer, responses={200: dict})
+    def post(self, request):
+        serializer = ChangePasswordSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            request.user.set_password(serializer.validated_data['new_password'])
+            request.user.save()
+            return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class BusinessProfileDetailView(generics.RetrieveUpdateAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = BusinessProfileSerializer
+
+    def get_object(self):
+        profile, created = BusinessProfile.objects.get_or_create(
+            user=self.request.user,
+            defaults={'name': '', 'category': '', 'location': ''}
+        )
+        return profile
+
+class DeleteAccountView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(responses={200: dict})
+    def delete(self, request):
+        user = request.user
+        user.delete()
+        return Response({"message": "Account deleted successfully."}, status=status.HTTP_200_OK)
+
+class LogoutView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(request={'type': 'object', 'properties': {'refresh': {'type': 'string'}}}, responses={200: dict})
+    def post(self, request):
+        try:
+            refresh_token = request.data.get('refresh')
+            if refresh_token:
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+                return Response({"message": "Logged out successfully."}, status=status.HTTP_200_OK)
+            return Response({"error": "Refresh token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({"error": "Invalid token."}, status=status.HTTP_400_BAD_REQUEST)
