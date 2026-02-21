@@ -26,10 +26,5 @@ class DashboardStatsSerializer(serializers.Serializer):
     total_users = serializers.IntegerField()
     active_businesses = serializers.IntegerField()
     total_activities = serializers.IntegerField()
-
-    def get_stats(self):
-        return {
-            "total_users": User.objects.count(),
-            "active_businesses": BusinessProfile.objects.count(),
-            "total_activities": ActivityLog.objects.count(),
-        }
+    unread_notifications = serializers.IntegerField()
+    recent_activities = ActivityLogSerializer(many=True, read_only=True)
